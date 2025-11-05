@@ -8,6 +8,17 @@ option(WITH_CUDA "Enable CUDA support" OFF)
 option(WITH_PYTHON "Link to Python when building" ON)
 
 if(WITH_CUDA)
+  # Set CUDA architectures - allow override from setup.py, otherwise use discovery or fallback to native
+  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+    # Try to discover available architectures
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.23")
+      set(CMAKE_CUDA_ARCHITECTURES all)
+    else()
+      # Fallback to native for older CMake versions
+      set(CMAKE_CUDA_ARCHITECTURES native)
+    endif()
+  endif()
+  message(STATUS "Building for CUDA architectures:  ${CMAKE_CUDA_ARCHITECTURES}")
   enable_language(CUDA)
   add_definitions(-D__CUDA_NO_HALF_OPERATORS__)
   add_definitions(-DWITH_CUDA)

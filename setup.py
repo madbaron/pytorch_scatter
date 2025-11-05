@@ -61,6 +61,25 @@ class CMakeBuild(build_ext):
         # Set CUDA flag
         if WITH_CUDA:
             cmake_args.append('-DWITH_CUDA=ON')
+            # Allow explicit CUDA architecture specification
+            cuda_archs = os.getenv('TORCH_CUDA_ARCH_LIST')
+            if cuda_archs:
+                # Convert space/semicolon separated list to CMake format
+                archs = cuda_archs.replace(' ', ';').replace(',', ';')
+                cmake_args.append(f'-DCMAKE_CUDA_ARCHITECTURES={archs}')
+            else:
+                # Use torch's default CUDA architectures if available
+                try:
+                    # Get the CUDA architectures that torch was compiled with
+                    torch_cuda_archs = torch.cuda.get_arch_list()
+                    if torch_cuda_archs:
+                        # Extract numeric versions (e.g., 'sm_75' -> '75')
+                        archs = [arch.replace('sm_', '') for arch in torch_cuda_archs if arch.startswith('sm_')]
+                        if archs:
+                            cmake_args.append(f'-DCMAKE_CUDA_ARCHITECTURES={";".join(archs)}')
+                except (AttributeError, RuntimeError):
+                    # Fallback if torch doesn't have get_arch_list or CUDA is not available
+                    pass
         else:
             cmake_args.append('-DWITH_CUDA=OFF')
 

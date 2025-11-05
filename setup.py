@@ -2,14 +2,16 @@ import glob
 import os
 import os.path as osp
 import platform
+import shutil
+import subprocess
 import sys
 from itertools import product
 
 import torch
-from setuptools import find_packages, setup
+from setuptools import Extension, find_packages, setup
+from setuptools.command.build_ext import build_ext
 from torch.__config__ import parallel_info
-from torch.utils.cpp_extension import (CUDA_HOME, BuildExtension, CppExtension,
-                                       CUDAExtension)
+from torch.utils.cpp_extension import CUDA_HOME
 
 __version__ = '2.1.2'
 URL = 'https://github.com/rusty1s/pytorch_scatter'
@@ -20,91 +22,100 @@ if torch.cuda.is_available():
 suffices = ['cpu', 'cuda'] if WITH_CUDA else ['cpu']
 if os.getenv('FORCE_CUDA', '0') == '1':
     suffices = ['cuda', 'cpu']
+    WITH_CUDA = True
 if os.getenv('FORCE_ONLY_CUDA', '0') == '1':
     suffices = ['cuda']
+    WITH_CUDA = True
 if os.getenv('FORCE_ONLY_CPU', '0') == '1':
     suffices = ['cpu']
+    WITH_CUDA = False
 
 BUILD_DOCS = os.getenv('BUILD_DOCS', '0') == '1'
 WITH_SYMBOLS = os.getenv('WITH_SYMBOLS', '0') == '1'
 
 
-def get_extensions():
-    extensions = []
+class CMakeBuild(build_ext):
+    """Custom build_ext command that uses CMake to build the extension."""
 
-    extensions_dir = osp.join('csrc')
-    main_files = glob.glob(osp.join(extensions_dir, '*.cpp'))
-    # remove generated 'hip' files, in case of rebuilds
-    main_files = [path for path in main_files if 'hip' not in path]
-
-    for main, suffix in product(main_files, suffices):
-        define_macros = [('WITH_PYTHON', None)]
-        undef_macros = []
-
-        if sys.platform == 'win32':
-            define_macros += [('torchscatter_EXPORTS', None)]
-
-        extra_compile_args = {'cxx': ['-O3']}
-        if not os.name == 'nt':  # Not on Windows:
-            extra_compile_args['cxx'] += ['-Wno-sign-compare']
-        extra_link_args = [] if WITH_SYMBOLS else ['-s']
-
-        info = parallel_info()
-        if ('backend: OpenMP' in info and 'OpenMP not found' not in info
-                and sys.platform != 'darwin'):
-            extra_compile_args['cxx'] += ['-DAT_PARALLEL_OPENMP']
-            if sys.platform == 'win32':
-                extra_compile_args['cxx'] += ['/openmp']
-            else:
-                extra_compile_args['cxx'] += ['-fopenmp']
+    def run(self):
+        """Build the extension using CMake."""
+        if BUILD_DOCS:
+            return
+        
+        # Get the build directory
+        build_temp = osp.abspath(self.build_temp)
+        os.makedirs(build_temp, exist_ok=True)
+        
+        # Get the package directory where we'll install the library
+        extdir = osp.abspath(osp.dirname(self.get_ext_fullpath('torch_scatter')))
+        package_dir = osp.join(extdir, 'torch_scatter')
+        os.makedirs(package_dir, exist_ok=True)
+        
+        # CMake configuration
+        cmake_args = [
+            f'-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={build_temp}',
+            f'-DCMAKE_PREFIX_PATH={torch.utils.cmake_prefix_path}',
+            '-DWITH_PYTHON=ON',
+        ]
+        
+        # Set CUDA flag
+        if WITH_CUDA:
+            cmake_args.append('-DWITH_CUDA=ON')
         else:
-            print('Compiling without OpenMP...')
-
-        # Compile for mac arm64
-        if sys.platform == 'darwin':
-            extra_compile_args['cxx'] += ['-D_LIBCPP_DISABLE_AVAILABILITY']
-            if platform.machine == 'arm64':
-                extra_compile_args['cxx'] += ['-arch', 'arm64']
-                extra_link_args += ['-arch', 'arm64']
-
-        if suffix == 'cuda':
-            define_macros += [('WITH_CUDA', None)]
-            nvcc_flags = os.getenv('NVCC_FLAGS', '')
-            nvcc_flags = [] if nvcc_flags == '' else nvcc_flags.split(' ')
-            nvcc_flags += ['-O3']
-            if torch.version.hip:
-                # USE_ROCM was added to later versions of PyTorch.
-                # Define here to support older PyTorch versions as well:
-                define_macros += [('USE_ROCM', None)]
-                undef_macros += ['__HIP_NO_HALF_CONVERSIONS__']
-            else:
-                nvcc_flags += ['--expt-relaxed-constexpr']
-            extra_compile_args['nvcc'] = nvcc_flags
-
-        name = main.split(os.sep)[-1][:-4]
-        sources = [main]
-
-        path = osp.join(extensions_dir, 'cpu', f'{name}_cpu.cpp')
-        if osp.exists(path):
-            sources += [path]
-
-        path = osp.join(extensions_dir, 'cuda', f'{name}_cuda.cu')
-        if suffix == 'cuda' and osp.exists(path):
-            sources += [path]
-
-        Extension = CppExtension if suffix == 'cpu' else CUDAExtension
-        extension = Extension(
-            f'torch_scatter._{name}_{suffix}',
-            sources,
-            include_dirs=[extensions_dir],
-            define_macros=define_macros,
-            undef_macros=undef_macros,
-            extra_compile_args=extra_compile_args,
-            extra_link_args=extra_link_args,
-        )
-        extensions += [extension]
-
-    return extensions
+            cmake_args.append('-DWITH_CUDA=OFF')
+        
+        # Build configuration
+        build_args = ['--config', 'Release']
+        
+        # Platform-specific configurations
+        if sys.platform == 'win32':
+            cmake_args += [
+                f'-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE={build_temp}',
+            ]
+            build_args += ['--', '/m']
+        else:
+            cmake_args += ['-DCMAKE_BUILD_TYPE=Release']
+            # Get number of CPUs for parallel build
+            import multiprocessing
+            num_jobs = multiprocessing.cpu_count()
+            build_args += ['--', f'-j{num_jobs}']
+        
+        # Run CMake configure
+        source_dir = osp.abspath(osp.dirname(__file__))
+        subprocess.check_call(['cmake', source_dir] + cmake_args, cwd=build_temp)
+        
+        # Run CMake build
+        subprocess.check_call(['cmake', '--build', '.'] + build_args, cwd=build_temp)
+        
+        # Copy the built library to the package directory
+        lib_pattern = 'libtorchscatter.*' if sys.platform != 'win32' else 'torchscatter.dll'
+        built_libs = glob.glob(osp.join(build_temp, lib_pattern))
+        
+        if not built_libs:
+            raise RuntimeError(f'Could not find built library matching {lib_pattern} in {build_temp}')
+        
+        for lib in built_libs:
+            lib_name = osp.basename(lib)
+            dest = osp.join(package_dir, lib_name)
+            print(f'Copying {lib} to {dest}')
+            shutil.copy(lib, dest)
+        
+        # Also install CMake config files to the package
+        # Create a cmake subdirectory in the package
+        cmake_install_dir = osp.join(package_dir, 'cmake')
+        os.makedirs(cmake_install_dir, exist_ok=True)
+        
+        # Copy CMake config files
+        cmake_files = [
+            osp.join(build_temp, 'TorchScatterConfig.cmake'),
+            osp.join(build_temp, 'TorchScatterConfigVersion.cmake'),
+        ]
+        
+        for cmake_file in cmake_files:
+            if osp.exists(cmake_file):
+                dest = osp.join(cmake_install_dir, osp.basename(cmake_file))
+                print(f'Copying {cmake_file} to {dest}')
+                shutil.copy(cmake_file, dest)
 
 
 install_requires = []
@@ -118,6 +129,11 @@ test_requires = [
 include_package_data = True
 if torch.cuda.is_available() and torch.version.hip:
     include_package_data = False
+
+# Create a dummy extension to trigger the build_ext command
+ext_modules = []
+if not BUILD_DOCS:
+    ext_modules = [Extension('torch_scatter._dummy', sources=[])]
 
 setup(
     name='torch_scatter',
@@ -133,11 +149,13 @@ setup(
     extras_require={
         'test': test_requires,
     },
-    ext_modules=get_extensions() if not BUILD_DOCS else [],
+    ext_modules=ext_modules,
     cmdclass={
-        'build_ext':
-        BuildExtension.with_options(no_python_abi_suffix=True, use_ninja=False)
+        'build_ext': CMakeBuild,
     },
     packages=find_packages(),
     include_package_data=include_package_data,
+    package_data={
+        'torch_scatter': ['*.so', '*.dylib', '*.dll', 'cmake/*'],
+    },
 )

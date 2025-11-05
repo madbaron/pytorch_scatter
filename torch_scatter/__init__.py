@@ -6,45 +6,51 @@ import torch
 
 __version__ = '2.1.2'
 
-for library in ['_version', '_scatter', '_segment_csr', '_segment_coo']:
-    cuda_spec = importlib.machinery.PathFinder().find_spec(
-        f'{library}_cuda', [osp.dirname(__file__)])
-    cpu_spec = importlib.machinery.PathFinder().find_spec(
-        f'{library}_cpu', [osp.dirname(__file__)])
-    spec = cuda_spec or cpu_spec
-    if spec is not None:
-        torch.ops.load_library(spec.origin)
-    elif os.getenv('BUILD_DOCS', '0') != '1':  # pragma: no cover
-        raise ImportError(f"Could not find module '{library}_cpu' in "
-                          f"{osp.dirname(__file__)}")
-    else:  # pragma: no cover
-        from .placeholder import cuda_version_placeholder
-        torch.ops.torch_scatter.cuda_version = cuda_version_placeholder
+# Load the single shared library built by CMake
+lib_name = 'libtorchscatter'
+if os.name == 'nt':  # Windows
+    lib_name = 'torchscatter'
 
-        from .placeholder import scatter_placeholder
-        torch.ops.torch_scatter.scatter_mul = scatter_placeholder
+lib_path = None
+for ext in ['.so', '.dylib', '.dll']:
+    potential_path = osp.join(osp.dirname(__file__), lib_name + ext)
+    if osp.exists(potential_path):
+        lib_path = potential_path
+        break
 
-        from .placeholder import scatter_arg_placeholder
-        torch.ops.torch_scatter.scatter_min = scatter_arg_placeholder
-        torch.ops.torch_scatter.scatter_max = scatter_arg_placeholder
+if lib_path is not None:
+    torch.ops.load_library(lib_path)
+elif os.getenv('BUILD_DOCS', '0') != '1':  # pragma: no cover
+    raise ImportError(f"Could not find library '{lib_name}' in "
+                      f"{osp.dirname(__file__)}")
+else:  # pragma: no cover
+    from .placeholder import cuda_version_placeholder
+    torch.ops.torch_scatter.cuda_version = cuda_version_placeholder
 
-        from .placeholder import (gather_csr_placeholder,
-                                  segment_csr_arg_placeholder,
-                                  segment_csr_placeholder)
-        torch.ops.torch_scatter.segment_sum_csr = segment_csr_placeholder
-        torch.ops.torch_scatter.segment_mean_csr = segment_csr_placeholder
-        torch.ops.torch_scatter.segment_min_csr = segment_csr_arg_placeholder
-        torch.ops.torch_scatter.segment_max_csr = segment_csr_arg_placeholder
-        torch.ops.torch_scatter.gather_csr = gather_csr_placeholder
+    from .placeholder import scatter_placeholder
+    torch.ops.torch_scatter.scatter_mul = scatter_placeholder
 
-        from .placeholder import (gather_coo_placeholder,
-                                  segment_coo_arg_placeholder,
-                                  segment_coo_placeholder)
-        torch.ops.torch_scatter.segment_sum_coo = segment_coo_placeholder
-        torch.ops.torch_scatter.segment_mean_coo = segment_coo_placeholder
-        torch.ops.torch_scatter.segment_min_coo = segment_coo_arg_placeholder
-        torch.ops.torch_scatter.segment_max_coo = segment_coo_arg_placeholder
-        torch.ops.torch_scatter.gather_coo = gather_coo_placeholder
+    from .placeholder import scatter_arg_placeholder
+    torch.ops.torch_scatter.scatter_min = scatter_arg_placeholder
+    torch.ops.torch_scatter.scatter_max = scatter_arg_placeholder
+
+    from .placeholder import (gather_csr_placeholder,
+                              segment_csr_arg_placeholder,
+                              segment_csr_placeholder)
+    torch.ops.torch_scatter.segment_sum_csr = segment_csr_placeholder
+    torch.ops.torch_scatter.segment_mean_csr = segment_csr_placeholder
+    torch.ops.torch_scatter.segment_min_csr = segment_csr_arg_placeholder
+    torch.ops.torch_scatter.segment_max_csr = segment_csr_arg_placeholder
+    torch.ops.torch_scatter.gather_csr = gather_csr_placeholder
+
+    from .placeholder import (gather_coo_placeholder,
+                              segment_coo_arg_placeholder,
+                              segment_coo_placeholder)
+    torch.ops.torch_scatter.segment_sum_coo = segment_coo_placeholder
+    torch.ops.torch_scatter.segment_mean_coo = segment_coo_placeholder
+    torch.ops.torch_scatter.segment_min_coo = segment_coo_arg_placeholder
+    torch.ops.torch_scatter.segment_max_coo = segment_coo_arg_placeholder
+    torch.ops.torch_scatter.gather_coo = gather_coo_placeholder
 
 cuda_version = torch.ops.torch_scatter.cuda_version()
 is_not_hip = torch.version.hip is None

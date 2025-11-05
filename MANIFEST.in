@@ -3,3 +3,5 @@ include LICENSE
 
 recursive-exclude test *
 recursive-include csrc *
+recursive-include cmake *
+include CMakeLists.txt

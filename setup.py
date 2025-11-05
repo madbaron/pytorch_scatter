@@ -41,32 +41,32 @@ class CMakeBuild(build_ext):
         """Build the extension using CMake."""
         if BUILD_DOCS:
             return
-        
+
         # Get the build directory
         build_temp = osp.abspath(self.build_temp)
         os.makedirs(build_temp, exist_ok=True)
-        
+
         # Get the package directory where we'll install the library
         extdir = osp.abspath(osp.dirname(self.get_ext_fullpath('torch_scatter')))
         package_dir = osp.join(extdir, 'torch_scatter')
         os.makedirs(package_dir, exist_ok=True)
-        
+
         # CMake configuration
         cmake_args = [
             f'-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={build_temp}',
             f'-DCMAKE_PREFIX_PATH={torch.utils.cmake_prefix_path}',
             '-DWITH_PYTHON=ON',
         ]
-        
+
         # Set CUDA flag
         if WITH_CUDA:
             cmake_args.append('-DWITH_CUDA=ON')
         else:
             cmake_args.append('-DWITH_CUDA=OFF')
-        
+
         # Build configuration
         build_args = ['--config', 'Release']
-        
+
         # Platform-specific configurations
         if sys.platform == 'win32':
             cmake_args += [
@@ -79,38 +79,38 @@ class CMakeBuild(build_ext):
             import multiprocessing
             num_jobs = multiprocessing.cpu_count()
             build_args += ['--', f'-j{num_jobs}']
-        
+
         # Run CMake configure
         source_dir = osp.abspath(osp.dirname(__file__))
         subprocess.check_call(['cmake', source_dir] + cmake_args, cwd=build_temp)
-        
+
         # Run CMake build
         subprocess.check_call(['cmake', '--build', '.'] + build_args, cwd=build_temp)
-        
+
         # Copy the built library to the package directory
         lib_pattern = 'libtorchscatter.*' if sys.platform != 'win32' else 'torchscatter.dll'
         built_libs = glob.glob(osp.join(build_temp, lib_pattern))
-        
+
         if not built_libs:
             raise RuntimeError(f'Could not find built library matching {lib_pattern} in {build_temp}')
-        
+
         for lib in built_libs:
             lib_name = osp.basename(lib)
             dest = osp.join(package_dir, lib_name)
             print(f'Copying {lib} to {dest}')
             shutil.copy(lib, dest)
-        
+
         # Also install CMake config files to the package
         # Create a cmake subdirectory in the package
         cmake_install_dir = osp.join(package_dir, 'cmake')
         os.makedirs(cmake_install_dir, exist_ok=True)
-        
+
         # Copy CMake config files
         cmake_files = [
             osp.join(build_temp, 'TorchScatterConfig.cmake'),
             osp.join(build_temp, 'TorchScatterConfigVersion.cmake'),
         ]
-        
+
         for cmake_file in cmake_files:
             if osp.exists(cmake_file):
                 dest = osp.join(cmake_install_dir, osp.basename(cmake_file))

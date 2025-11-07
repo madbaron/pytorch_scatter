@@ -1,110 +1,96 @@
-import glob
 import os
 import os.path as osp
-import platform
+import shutil
 import sys
-from itertools import product
+from pathlib import Path
 
 import torch
 from setuptools import find_packages, setup
-from torch.__config__ import parallel_info
-from torch.utils.cpp_extension import (CUDA_HOME, BuildExtension, CppExtension,
-                                       CUDAExtension)
+from setuptools.command.build_ext import build_ext
+
+# Import cmake build helper
+from tools.setup_helpers.cmake import CMake
 
 __version__ = '2.1.2'
 URL = 'https://github.com/rusty1s/pytorch_scatter'
 
-WITH_CUDA = False
-if torch.cuda.is_available():
-    WITH_CUDA = CUDA_HOME is not None or torch.version.hip
-suffices = ['cpu', 'cuda'] if WITH_CUDA else ['cpu']
-if os.getenv('FORCE_CUDA', '0') == '1':
-    suffices = ['cuda', 'cpu']
-if os.getenv('FORCE_ONLY_CUDA', '0') == '1':
-    suffices = ['cuda']
-if os.getenv('FORCE_ONLY_CPU', '0') == '1':
-    suffices = ['cpu']
-
 BUILD_DOCS = os.getenv('BUILD_DOCS', '0') == '1'
-WITH_SYMBOLS = os.getenv('WITH_SYMBOLS', '0') == '1'
 
 
-def get_extensions():
-    extensions = []
-
-    extensions_dir = osp.join('csrc')
-    main_files = glob.glob(osp.join(extensions_dir, '*.cpp'))
-    # remove generated 'hip' files, in case of rebuilds
-    main_files = [path for path in main_files if 'hip' not in path]
-
-    for main, suffix in product(main_files, suffices):
-        define_macros = [('WITH_PYTHON', None)]
-        undef_macros = []
-
-        if sys.platform == 'win32':
-            define_macros += [('torchscatter_EXPORTS', None)]
-
-        extra_compile_args = {'cxx': ['-O3']}
-        if not os.name == 'nt':  # Not on Windows:
-            extra_compile_args['cxx'] += ['-Wno-sign-compare']
-        extra_link_args = [] if WITH_SYMBOLS else ['-s']
-
-        info = parallel_info()
-        if ('backend: OpenMP' in info and 'OpenMP not found' not in info
-                and sys.platform != 'darwin'):
-            extra_compile_args['cxx'] += ['-DAT_PARALLEL_OPENMP']
-            if sys.platform == 'win32':
-                extra_compile_args['cxx'] += ['/openmp']
-            else:
-                extra_compile_args['cxx'] += ['-fopenmp']
-        else:
-            print('Compiling without OpenMP...')
-
-        # Compile for mac arm64
-        if sys.platform == 'darwin':
-            extra_compile_args['cxx'] += ['-D_LIBCPP_DISABLE_AVAILABILITY']
-            if platform.machine == 'arm64':
-                extra_compile_args['cxx'] += ['-arch', 'arm64']
-                extra_link_args += ['-arch', 'arm64']
-
-        if suffix == 'cuda':
-            define_macros += [('WITH_CUDA', None)]
-            nvcc_flags = os.getenv('NVCC_FLAGS', '')
-            nvcc_flags = [] if nvcc_flags == '' else nvcc_flags.split(' ')
-            nvcc_flags += ['-O3']
-            if torch.version.hip:
-                # USE_ROCM was added to later versions of PyTorch.
-                # Define here to support older PyTorch versions as well:
-                define_macros += [('USE_ROCM', None)]
-                undef_macros += ['__HIP_NO_HALF_CONVERSIONS__']
-            else:
-                nvcc_flags += ['--expt-relaxed-constexpr']
-            extra_compile_args['nvcc'] = nvcc_flags
-
-        name = main.split(os.sep)[-1][:-4]
-        sources = [main]
-
-        path = osp.join(extensions_dir, 'cpu', f'{name}_cpu.cpp')
-        if osp.exists(path):
-            sources += [path]
-
-        path = osp.join(extensions_dir, 'cuda', f'{name}_cuda.cu')
-        if suffix == 'cuda' and osp.exists(path):
-            sources += [path]
-
-        Extension = CppExtension if suffix == 'cpu' else CUDAExtension
-        extension = Extension(
-            f'torch_scatter._{name}_{suffix}',
-            sources,
-            include_dirs=[extensions_dir],
-            define_macros=define_macros,
-            undef_macros=undef_macros,
-            extra_compile_args=extra_compile_args,
-            extra_link_args=extra_link_args,
-        )
-        extensions += [extension]
-
-    return extensions
+class CMakeBuild(build_ext):
+    """Custom build_ext command that uses CMake."""
+    
+    def run(self):
+        """Run CMake build process."""
+        if BUILD_DOCS:
+            # Skip building for docs
+            return
+        
+        try:
+            # Get PyTorch cmake prefix path
+            import torch.utils.cpp_extension
+            torch_dir = Path(torch.__file__).parent
+            cmake_prefix_path = str(torch_dir / 'share' / 'cmake')
+            
+            # Fallback to torch directory if share/cmake doesn't exist
+            if not os.path.exists(cmake_prefix_path):
+                cmake_prefix_path = str(torch_dir)
+            
+            # Initialize CMake
+            cmake = CMake()
+            
+            # Generate build files
+            print("Configuring CMake build...")
+            cmake.generate(
+                version=__version__,
+                build_python=True,
+                cmake_prefix_path=cmake_prefix_path,
+            )
+            
+            # Build the project
+            print("Building with CMake...")
+            cmake.build(parallel=True)
+            
+            # Install to torch_scatter directory
+            print("Installing libraries...")
+            cmake.install()
+            
+            # Copy built libraries to the build/lib directory for development installs
+            if self.build_lib:
+                src_dir = Path('torch_scatter')
+                dst_dir = Path(self.build_lib) / 'torch_scatter'
+                dst_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Determine library extension based on platform
+                import sys
+                if sys.platform == 'win32':
+                    lib_extensions = ['*.pyd', '*.dll']
+                else:
+                    lib_extensions = ['*.so']
+                
+                # Copy library files
+                for pattern in lib_extensions:
+                    for lib_file in src_dir.glob(pattern):
+                        shutil.copy2(lib_file, dst_dir / lib_file.name)
+                        print(f"Copied {lib_file} to {dst_dir / lib_file.name}")
+                
+                # Copy share directory (CMake configs)
+                if (src_dir / 'share').exists():
+                    shutil.copytree(src_dir / 'share', dst_dir / 'share', dirs_exist_ok=True)
+                    print(f"Copied share directory to {dst_dir / 'share'}")
+                
+                # Copy include directory (headers)
+                if (src_dir / 'include').exists():
+                    shutil.copytree(src_dir / 'include', dst_dir / 'include', dirs_exist_ok=True)
+                    print(f"Copied include directory to {dst_dir / 'include'}")
+            
+        except Exception as e:
+            raise RuntimeError(f"CMake build failed: {e}") from e
+    
+    def get_outputs(self):
+        """Return list of built files."""
+        # Return empty list since CMake handles the installation
+        return []
 
 
 install_requires = []
@@ -133,10 +119,9 @@ setup(
     extras_require={
         'test': test_requires,
     },
-    ext_modules=get_extensions() if not BUILD_DOCS else [],
+    ext_modules=[],  # CMake handles the extensions
     cmdclass={
-        'build_ext':
-        BuildExtension.with_options(no_python_abi_suffix=True, use_ninja=False)
+        'build_ext': CMakeBuild,
     },
     packages=find_packages(),
     include_package_data=include_package_data,

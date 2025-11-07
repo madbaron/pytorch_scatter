@@ -1,16 +1,15 @@
 """Manages CMake build process."""
 
-import json
 import multiprocessing
 import os
 import shutil
 import sys
 from pathlib import Path
-from subprocess import CalledProcessError, check_call, check_output, DEVNULL
+from subprocess import CalledProcessError, check_call
 from typing import Any, Dict, Optional
 
-from .cmake_utils import CMakeValue, get_cmake_cache_variables_from_file
-from .env import BUILD_DIR, IS_DARWIN, IS_WINDOWS, IS_64BIT
+from .cmake_utils import get_cmake_cache_variables_from_file
+from .env import BUILD_DIR, IS_WINDOWS, IS_64BIT
 
 
 def _mkdir_p(d: str) -> None:

@@ -20,26 +20,60 @@ if (WITH_PYTHON)
 endif()
 find_package(Torch REQUIRED)
 
-file(GLOB HEADERS csrc/*.h)
-file(GLOB OPERATOR_SOURCES csrc/cpu/*.h csrc/cpu/*.cpp csrc/*.cpp)
+# Function to create a library for each operation
+function(add_scatter_library name sources)
+  add_library(${name} SHARED ${sources})
+  target_link_libraries(${name} PRIVATE ${TORCH_LIBRARIES})
+  if (WITH_PYTHON)
+    target_link_libraries(${name} PRIVATE Python3::Python)
+  endif()
+  target_include_directories(${name} PRIVATE csrc)
+  
+  # Set output name to match Python expectations (no prefix, no suffix)
+  set_target_properties(${name} PROPERTIES PREFIX "")
+  if(NOT WIN32)
+    set_target_properties(${name} PROPERTIES SUFFIX ".so")
+  endif()
+  
+  # Install to the Python package directory (CMAKE_INSTALL_PREFIX is set to torch_scatter)
+  install(TARGETS ${name} LIBRARY DESTINATION .)
+endfunction()
+
+# Build version library
+add_scatter_library(_version_cpu csrc/version.cpp)
 if(WITH_CUDA)
-  file(GLOB OPERATOR_SOURCES ${OPERATOR_SOURCES} csrc/cuda/*.h csrc/cuda/*.cu)
+  add_scatter_library(_version_cuda csrc/version.cpp)
 endif()
 
-add_library(${PROJECT_NAME} SHARED ${OPERATOR_SOURCES})
-target_link_libraries(${PROJECT_NAME} PRIVATE ${TORCH_LIBRARIES})
-if (WITH_PYTHON)
-  target_link_libraries(${PROJECT_NAME} PRIVATE Python3::Python)
+# Build scatter libraries
+set(SCATTER_SOURCES csrc/scatter.cpp csrc/cpu/scatter_cpu.cpp)
+add_scatter_library(_scatter_cpu ${SCATTER_SOURCES})
+if(WITH_CUDA)
+  set(SCATTER_SOURCES_CUDA csrc/scatter.cpp csrc/cpu/scatter_cpu.cpp csrc/cuda/scatter_cuda.cu)
+  add_scatter_library(_scatter_cuda ${SCATTER_SOURCES_CUDA})
 endif()
-set_target_properties(${PROJECT_NAME} PROPERTIES EXPORT_NAME TorchScatter)
 
-target_include_directories(${PROJECT_NAME} INTERFACE
-  "$<BUILD_INTERFACE:${HEADERS}>"
-  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+# Build segment_csr libraries
+set(SEGMENT_CSR_SOURCES csrc/segment_csr.cpp csrc/cpu/segment_csr_cpu.cpp)
+add_scatter_library(_segment_csr_cpu ${SEGMENT_CSR_SOURCES})
+if(WITH_CUDA)
+  set(SEGMENT_CSR_SOURCES_CUDA csrc/segment_csr.cpp csrc/cpu/segment_csr_cpu.cpp csrc/cuda/segment_csr_cuda.cu)
+  add_scatter_library(_segment_csr_cuda ${SEGMENT_CSR_SOURCES_CUDA})
+endif()
 
+# Build segment_coo libraries
+set(SEGMENT_COO_SOURCES csrc/segment_coo.cpp csrc/cpu/segment_coo_cpu.cpp)
+add_scatter_library(_segment_coo_cpu ${SEGMENT_COO_SOURCES})
+if(WITH_CUDA)
+  set(SEGMENT_COO_SOURCES_CUDA csrc/segment_coo.cpp csrc/cpu/segment_coo_cpu.cpp csrc/cuda/segment_coo_cuda.cu)
+  add_scatter_library(_segment_coo_cuda ${SEGMENT_COO_SOURCES_CUDA})
+endif()
+
+# Install CMake configuration files for downstream usage
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
+file(GLOB HEADERS csrc/*.h)
 set(TORCHSCATTER_CMAKECONFIG_INSTALL_DIR "share/cmake/TorchScatter" CACHE STRING "install path for TorchScatterConfig.cmake")
 
 configure_package_config_file(cmake/TorchScatterConfig.cmake.in
@@ -54,10 +88,15 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/TorchScatterConfig.cmake
   ${CMAKE_CURRENT_BINARY_DIR}/TorchScatterConfigVersion.cmake
   DESTINATION ${TORCHSCATTER_CMAKECONFIG_INSTALL_DIR})
 
-install(TARGETS ${PROJECT_NAME}
-  EXPORT TorchScatterTargets
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  )
+# Create a legacy library target for backward compatibility
+add_library(torchscatter INTERFACE)
+set_target_properties(torchscatter PROPERTIES EXPORT_NAME TorchScatter)
+target_include_directories(torchscatter INTERFACE
+  "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/csrc>"
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+
+install(TARGETS torchscatter
+  EXPORT TorchScatterTargets)
 
 install(EXPORT TorchScatterTargets
   NAMESPACE TorchScatter::

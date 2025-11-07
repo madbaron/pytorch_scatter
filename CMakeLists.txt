@@ -46,27 +46,21 @@ if(WITH_CUDA)
 endif()
 
 # Build scatter libraries
-set(SCATTER_SOURCES csrc/scatter.cpp csrc/cpu/scatter_cpu.cpp)
-add_scatter_library(_scatter_cpu ${SCATTER_SOURCES})
+add_scatter_library(_scatter_cpu "csrc/scatter.cpp;csrc/cpu/scatter_cpu.cpp")
 if(WITH_CUDA)
-  set(SCATTER_SOURCES_CUDA csrc/scatter.cpp csrc/cpu/scatter_cpu.cpp csrc/cuda/scatter_cuda.cu)
-  add_scatter_library(_scatter_cuda ${SCATTER_SOURCES_CUDA})
+  add_scatter_library(_scatter_cuda "csrc/scatter.cpp;csrc/cpu/scatter_cpu.cpp;csrc/cuda/scatter_cuda.cu")
 endif()
 
 # Build segment_csr libraries
-set(SEGMENT_CSR_SOURCES csrc/segment_csr.cpp csrc/cpu/segment_csr_cpu.cpp)
-add_scatter_library(_segment_csr_cpu ${SEGMENT_CSR_SOURCES})
+add_scatter_library(_segment_csr_cpu "csrc/segment_csr.cpp;csrc/cpu/segment_csr_cpu.cpp")
 if(WITH_CUDA)
-  set(SEGMENT_CSR_SOURCES_CUDA csrc/segment_csr.cpp csrc/cpu/segment_csr_cpu.cpp csrc/cuda/segment_csr_cuda.cu)
-  add_scatter_library(_segment_csr_cuda ${SEGMENT_CSR_SOURCES_CUDA})
+  add_scatter_library(_segment_csr_cuda "csrc/segment_csr.cpp;csrc/cpu/segment_csr_cpu.cpp;csrc/cuda/segment_csr_cuda.cu")
 endif()
 
 # Build segment_coo libraries
-set(SEGMENT_COO_SOURCES csrc/segment_coo.cpp csrc/cpu/segment_coo_cpu.cpp)
-add_scatter_library(_segment_coo_cpu ${SEGMENT_COO_SOURCES})
+add_scatter_library(_segment_coo_cpu "csrc/segment_coo.cpp;csrc/cpu/segment_coo_cpu.cpp")
 if(WITH_CUDA)
-  set(SEGMENT_COO_SOURCES_CUDA csrc/segment_coo.cpp csrc/cpu/segment_coo_cpu.cpp csrc/cuda/segment_coo_cuda.cu)
-  add_scatter_library(_segment_coo_cuda ${SEGMENT_COO_SOURCES_CUDA})
+  add_scatter_library(_segment_coo_cuda "csrc/segment_coo.cpp;csrc/cpu/segment_coo_cpu.cpp;csrc/cuda/segment_coo_cuda.cu")
 endif()
 
 # Install CMake configuration files for downstream usage

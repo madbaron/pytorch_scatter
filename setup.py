@@ -55,6 +55,27 @@ class CMakeBuild(build_ext):
             print("Installing libraries...")
             cmake.install()
             
+            # Copy built libraries to the build/lib directory for development installs
+            if self.build_lib:
+                src_dir = Path('torch_scatter')
+                dst_dir = Path(self.build_lib) / 'torch_scatter'
+                dst_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Copy .so files
+                for so_file in src_dir.glob('*.so'):
+                    shutil.copy2(so_file, dst_dir / so_file.name)
+                    print(f"Copied {so_file} to {dst_dir / so_file.name}")
+                
+                # Copy share directory (CMake configs)
+                if (src_dir / 'share').exists():
+                    shutil.copytree(src_dir / 'share', dst_dir / 'share', dirs_exist_ok=True)
+                    print(f"Copied share directory to {dst_dir / 'share'}")
+                
+                # Copy include directory (headers)
+                if (src_dir / 'include').exists():
+                    shutil.copytree(src_dir / 'include', dst_dir / 'include', dirs_exist_ok=True)
+                    print(f"Copied include directory to {dst_dir / 'include'}")
+            
         except Exception as e:
             raise RuntimeError(f"CMake build failed: {e}") from e
     

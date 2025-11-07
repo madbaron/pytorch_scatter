@@ -12,3 +12,5 @@ dist/
 *.hip
 *_hip.cpp
 hip
+torch_scatter/share/
+torch_scatter/include/

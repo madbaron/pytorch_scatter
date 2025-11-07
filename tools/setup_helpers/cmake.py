@@ -9,7 +9,7 @@ from subprocess import CalledProcessError, check_call
 from typing import Any, Dict, Optional
 
 from .cmake_utils import get_cmake_cache_variables_from_file
-from .env import BUILD_DIR, IS_WINDOWS, IS_64BIT
+from .env import BUILD_DIR, IS_WINDOWS, IS_64BIT, get_cuda_env_flags
 
 
 def _mkdir_p(d: str) -> None:
@@ -52,6 +52,7 @@ class CMake:
         build_dir: Optional[str] = None,
         cmake_prefix_path: Optional[str] = None,
         extra_cmake_args: Optional[list] = None,
+        source_dir: Optional[str] = None,
     ) -> None:
         """Runs cmake to generate native build files."""
         
@@ -73,8 +74,10 @@ class CMake:
                 args.append("-Ax64")
 
         # Add source directory
-        base_dir = str(Path(__file__).absolute().parents[2])
-        args.append(base_dir)
+        if source_dir is None:
+            # Default to repository root (two levels up from this file)
+            source_dir = str(Path(__file__).absolute().parents[2])
+        args.append(source_dir)
         
         # Set build type
         build_type = "Release"
@@ -84,17 +87,15 @@ class CMake:
             build_type = "RelWithDebInfo"
         args.append(f"-DCMAKE_BUILD_TYPE={build_type}")
         
-        # Set install prefix to build lib directory
-        install_dir = os.path.join(base_dir, "torch_scatter")
+        # Set install prefix to torch_scatter directory
+        install_dir = os.path.join(source_dir, "torch_scatter")
         args.append(f"-DCMAKE_INSTALL_PREFIX={install_dir}")
         
         # Build options
         args.append(f"-DWITH_PYTHON={'ON' if build_python else 'OFF'}")
         
         # CUDA support
-        with_cuda = os.getenv("FORCE_CUDA", "0") == "1" or os.getenv("FORCE_ONLY_CUDA", "0") == "1"
-        if os.getenv("FORCE_ONLY_CPU", "0") == "1":
-            with_cuda = False
+        with_cuda = get_cuda_env_flags()
         args.append(f"-DWITH_CUDA={'ON' if with_cuda else 'OFF'}")
         
         # Set CMake prefix path if provided

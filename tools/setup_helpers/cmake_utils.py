@@ -15,7 +15,14 @@ class CMakeValue:
 
 
 def get_cmake_cache_variables_from_file(f):
-    """Parse CMake cache file and return variables as a dictionary."""
+    """Parse CMake cache file and return variables as a dictionary.
+    
+    Args:
+        f: A file-like object (opened CMakeCache.txt file)
+    
+    Returns:
+        dict: Dictionary mapping variable names to their values
+    """
     results = {}
     for line in f:
         line = line.strip()

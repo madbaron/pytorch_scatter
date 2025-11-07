@@ -15,6 +15,20 @@ def check_negative_env_flag(name: str, default: str = "") -> bool:
     return os.getenv(name, default).upper() in ["OFF", "0", "NO", "FALSE", "N"]
 
 
+def get_cuda_env_flags():
+    """Determine CUDA build flags from environment variables.
+    
+    Returns:
+        bool: True if CUDA should be built, False otherwise
+    """
+    # Check if CUDA is forced via environment
+    if check_env_flag("FORCE_CUDA") or check_env_flag("FORCE_ONLY_CUDA"):
+        return True
+    if check_env_flag("FORCE_ONLY_CPU"):
+        return False
+    return False
+
+
 IS_WINDOWS = sys.platform == "win32"
 IS_DARWIN = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")

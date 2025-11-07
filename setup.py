@@ -61,10 +61,18 @@ class CMakeBuild(build_ext):
                 dst_dir = Path(self.build_lib) / 'torch_scatter'
                 dst_dir.mkdir(parents=True, exist_ok=True)
                 
-                # Copy .so files
-                for so_file in src_dir.glob('*.so'):
-                    shutil.copy2(so_file, dst_dir / so_file.name)
-                    print(f"Copied {so_file} to {dst_dir / so_file.name}")
+                # Determine library extension based on platform
+                import sys
+                if sys.platform == 'win32':
+                    lib_extensions = ['*.pyd', '*.dll']
+                else:
+                    lib_extensions = ['*.so']
+                
+                # Copy library files
+                for pattern in lib_extensions:
+                    for lib_file in src_dir.glob(pattern):
+                        shutil.copy2(lib_file, dst_dir / lib_file.name)
+                        print(f"Copied {lib_file} to {dst_dir / lib_file.name}")
                 
                 # Copy share directory (CMake configs)
                 if (src_dir / 'share').exists():
